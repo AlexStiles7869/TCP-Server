@@ -1,10 +1,13 @@
-from typing import Tuple
-from FileRequest import FileRequest, FileRequestIllegalMagicNumber, FileRequestIllegalType, FileRequestIllegalFileNameLength
+from FileRequest import FileRequest, FileRequestError
 from FileResponse import FileResponse, FileResponseStatus
 import argparse
 import socket
-import sys
+from socket import error as socket_error
 import time
+
+class ConnectionError(Exception):
+    def __init__(self, message : str):
+        super().__init__(message)
 
 class Server:
 
@@ -12,23 +15,22 @@ class Server:
     ALLOWED_PORT_RANGE = (1024, 64000)
 
     def __init__(self, port : int):
-        if (port < Server.ALLOWED_PORT_RANGE[0] or port > Server.ALLOWED_PORT_RANGE[1]):
-            print("The port number provided is not in the allowed range of 1024 to 64000 (inclusive).")
-            sys.exit()
-        
-        self.port = port
-        
         print("---SERVER SETUP---\n")
+
+        if (port < Server.ALLOWED_PORT_RANGE[0] or port > Server.ALLOWED_PORT_RANGE[1]):
+            raise SystemExit(f"SERVER PORT NUMBER INVALID: The port number provided is not in the allowed range of {Server.ALLOWED_PORT_RANGE[0]} to {Server.ALLOWED_PORT_RANGE[1]} (inclusive).")
+
+        self.port = port
 
         try:
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            print("SERVER SOCKET CREATION SUCCESSFUL")
-        except socket.error as error:
-            print(f"SERVER SOCKET CREATION UNSUCCESSFUL: {error}")
-            sys.exit()
+            self.socket.bind(("localhost", self.port))
 
-        self.socket.bind(("localhost", self.port))
+            print("SERVER SOCKET CREATION SUCCESSFUL")
+        
+        except socket_error as error:
+            raise SystemExit(f"SERVER SOCKET CREATION UNSUCCESSFUL: {error}")
 
     @staticmethod
     def get_time() -> str:
@@ -40,9 +42,8 @@ class Server:
         try:
             self.socket.listen(Server.BACKLOG_SIZE)
             print("SOCKET IS LISTENING")
-        except socket.error as err:
-            print(f"OPENING SOCKET FAILED: {err}")
-            sys.exit()
+        except socket_error as error:
+            raise SystemExit(f"OPENING SOCKET FAILED: {error}")
 
         while True:
             # Allow client socket to connect (blocking in thread)
@@ -72,14 +73,16 @@ class Server:
                 # Send the record
                 Server.send_file_response(client_socket, file_response_record)
 
-            except (FileRequestIllegalMagicNumber, FileRequestIllegalType, FileRequestIllegalFileNameLength) as error:
+            except (ConnectionError, FileRequestError) as error:
+                # Output the error
                 print(error)
-                sys.exit()
+
             finally:
                 # Close the socket
                 client_socket.close()
                 # Get the current time
                 current_time = Server.get_time()
+
                 print("\n---ENDING COMMUNICATION---\n")
                 print(f"CONNECTION TERMINATED (Server Confirmation) | Time : {current_time} | IP: {addr[0]} | Port: {addr[1]}")
 
@@ -87,12 +90,16 @@ class Server:
 
     """ Receives the file request from the client. """
     @staticmethod
-    def receive_file_request_header(client_socket : socket.socket) -> int:
+    def receive_file_request_header(client_socket : socket) -> int:
         received_header_bytes = 0
         received_header_bytes_array = bytearray()
 
         while received_header_bytes < FileRequest.FIXED_HEADER_SIZE:
             received_bytes = client_socket.recv(FileRequest.FIXED_HEADER_SIZE)
+
+            if (received_bytes == b''):
+                raise ConnectionError("CONNECTION ERROR: The connection was broken while receiving the FileRequest header.")
+
             received_header_bytes_array += received_bytes
             received_header_bytes += len(received_bytes)
 
@@ -106,12 +113,16 @@ class Server:
         return filename_length
         
     @staticmethod
-    def receive_file_request_data(client_socket : socket.socket, filename_length : int) -> str:
+    def receive_file_request_data(client_socket : socket, filename_length : int) -> str:
         received_data_bytes = 0
         received_data_bytes_array = bytearray()
 
         while (received_data_bytes < filename_length):
             received_bytes = client_socket.recv(filename_length)
+
+            if (received_bytes == b''):
+                raise ConnectionError("CONNECTION ERROR: The connection was broken while receiving the FileRequest data.")
+
             received_data_bytes_array += received_bytes
             received_data_bytes += len(received_bytes)
 
@@ -147,7 +158,7 @@ class Server:
         return file_response_record
 
     @staticmethod
-    def send_file_response(client_socket : socket.socket, file_response_record : bytearray):
+    def send_file_response(client_socket : socket, file_response_record : bytearray):
         sent_file_repsonse_bytes = 0
 
         while sent_file_repsonse_bytes < len(file_response_record):

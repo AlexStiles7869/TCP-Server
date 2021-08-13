@@ -1,14 +1,23 @@
 import argparse
 import socket
 from FileRequest import FileRequest
-from FileResponse import FileResponse, FileResponseIllegalMagicNumber, FileResponseIllegalType, FileResponseStatus
+from FileResponse import FileResponse, FileResponseError, FileResponseStatus
 import os
 import sys
 import time
 
+class FileNameConflictException(Exception):
+    def  __init__(self, filename : int, message = f"The file already exists. Please delete / move it and restart the client."):
+        self.filename = filename
+        self.message = message
+        super().__init__(self.message)
+
+    def __str__(self):
+        return f"Filename: {self.filename} -> {self.message}"
+
 class Client:
     def __init__(self, ip : str, port : int):
-        self.ip = ip
+        self.ip = socket.gethostbyname(ip)
         self.port = port
 
         print("---CLIENT SETUP---\n")
@@ -27,12 +36,11 @@ class Client:
 
     def establish_connection(self):
         # Attempt to connect to the server
-
         try:
             self.socket.connect((self.ip, self.port))
             print(f"CONNECTION ACCEPTED (Client Confirmation) | Time: {Client.get_time()} | IP: {self.ip} | Port: {self.port}")
         except socket.error as err:
-            print(f"CONNECTION FAILED: {err}")
+            raise SystemExit(f"CONNECTION FAILED: {err}")
 
     @staticmethod
     def create_file_request(filename : str) -> bytearray:
@@ -42,7 +50,16 @@ class Client:
         return file_request_record
 
     # Send the FileRequest to the server
-    def send_file_request(self, filename : str):
+    def send_file_request(self, filename : str, destination_file_name : str):
+
+        try:
+            if (os.path.isfile(destination_file_name)):
+                raise FileNameConflictException(destination_file_name)
+        except FileNameConflictException as error:
+            raise SystemExit(error)
+
+        self.establish_connection()
+
         print("\n---ATTEMPTING TO SEND FILE REQUEST---\n")
 
         file_request_record = self.create_file_request(filename)
@@ -54,7 +71,9 @@ class Client:
 
         print(f"FILE REQUEST SENT | Bytes: {len(file_request_record)}")
 
-        self.handle_file_response()
+        self.handle_file_response(filename, destination_file_name)
+
+        self.end_connection()
 
     def receive_file_response_header(self) -> bytearray:
         print("\n---ATTEMPTING TO RECEIVE FILE RESPONSE---\n")
@@ -85,14 +104,14 @@ class Client:
 
         return receieved_data_bytes_array
 
-    def handle_file_response(self):
+    def handle_file_response(self, filename : str, destination_file_name : str):
 
         file_response_header = self.receive_file_response_header()
 
         try:
             FileResponse.check_record_validity(file_response_header)
 
-            if (FileResponse.get_status_code(file_response_header)):
+            if (FileResponse.get_status_code(file_response_header) == FileResponseStatus.SUCCESS):
                 # Get the file data length
                 file_data_length = FileResponse.get_file_length(file_response_header)
 
@@ -100,17 +119,17 @@ class Client:
                 file_response_data = self.receive_file_response_data(file_data_length)
 
                 # Write the data to the specified file
-                self.write_response_to_file(file_response_data)
+                self.write_response_to_file(file_response_data, destination_file_name)
 
             else:
-                print(f"THE SERVER HAS INDICATED THE FILE DOES NOT EXIST")
-        except (FileResponseIllegalMagicNumber, FileResponseIllegalType) as error:
+                print(f"SERVER CANNOT FILE: The file '{filename}' cannot be found.")
+        except FileResponseError as error:
             print(error)
 
-    def write_response_to_file(self, file_response_data : bytearray):
-        with open("server.txt", "a+") as file:
+    def write_response_to_file(self, file_response_data : bytearray, destination_file_name : str):
+        with open(destination_file_name, "w") as file:
             file.write(file_response_data.decode("utf-8"))
-            print(f"FILE DATA WRITTEN | Bytes: {len(file_response_data)}")
+            print(f"FILE DATA WRITTEN | Bytes: {len(file_response_data)} | Destination Filename: {destination_file_name}")
 
     def end_connection(self):
         print("\n---ENDING COMMUNICATION---\n")
@@ -129,11 +148,10 @@ def main():
     ip = "localhost"
     port = 12345
     file_name = "client.txt"
+    destination_file_name = "server.txt"
 
     client = Client(ip, port)
-    client.establish_connection()
-    client.send_file_request(file_name)
-    client.end_connection()
+    client.send_file_request(file_name, destination_file_name)
 
 if __name__ == "__main__":
     main()

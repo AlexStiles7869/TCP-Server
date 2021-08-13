@@ -1,5 +1,9 @@
 from enum import IntEnum
 
+class FileResponseError(Exception):
+    def  __init__(self, message : str):
+        super().__init__(message)
+
 class FileResponseStatus(IntEnum):
     FAIL = 0,
     SUCCESS = 1
@@ -59,27 +63,9 @@ class FileResponse:
         # Check the magic number
         magic_number = FileResponse.get_magic_number(file_response_header_byte_array)
         if (magic_number != FileResponse.MAGIC_NO):
-            raise FileResponseIllegalMagicNumber(magic_number)
+            raise FileResponseError(f"FILE REQUEST ERROR: The magic number is wrong ({magic_number} != {FileResponse.MAGIC_NO}).")
 
         # Check the type
         type_number = FileResponse.get_type(file_response_header_byte_array)
         if (type_number != FileResponse.TYPE):
-            raise FileResponseIllegalType(type_number)
-
-class FileResponseIllegalMagicNumber(Exception):
-    def  __init__(self, magic_number : int, message = f"The magic number of the FileResponse is incorrect, it must be {FileResponse.MAGIC_NO}"):
-        self.magic_number = magic_number
-        self.message = message
-        super().__init__(self.message)
-
-    def __str__(self):
-        return f"FileReponse Magic Number: {self.magic_number} -> {self.message}"
-
-class FileResponseIllegalType(Exception):
-    def  __init__(self, type_number : int, message = f"The type of the FileResponse is incorrect, it must be {FileResponse.TYPE}"):
-        self.type_number = type_number
-        self.message = message
-        super().__init__(self.message)
-
-    def __str__(self):
-        return f"FileResponse Type: {self.type_number} -> {self.message}"
+            raise FileResponseError(f"FILE REQUEST ERROR: The type is wrong ({type_number} != {FileResponse.TYPE}).")
